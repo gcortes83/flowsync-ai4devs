@@ -1,0 +1,56 @@
+# Bases de datos de FlowSync: PostgreSQL 17 con pgvector.
+#
+#   db       desarrollo, puerto 54410, datos en un volumen con nombre.
+#   db-test  pruebas,     puerto 54411, datos en memoria (tmpfs), sin volumen.
+#
+# Puertos fuera del 5432 a propósito: si ya hay un PostgreSQL en la máquina, el
+# choque daría un error que no menciona a Docker.
+#
+# La primera vez que arranca, la imagen crea la base y no acepta conexiones
+# hasta terminar. Por eso cada servicio lleva healthcheck y se levantan con
+# `docker compose up -d --wait` (lo hace `make db-up`), que no devuelve el
+# control hasta que los dos están sanos.
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: flowsync
+      POSTGRES_PASSWORD: flowsync
+      POSTGRES_DB: flowsync_dev
+    ports:
+      - "54410:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Por TCP (-h 127.0.0.1) y no por socket: mientras inicializa, la imagen
+      # levanta un servidor temporal que solo escucha en el socket Unix, y
+      # pg_isready a secas daría sano antes de tiempo.
+      test: ["CMD-SHELL", "pg_isready -U flowsync -d flowsync_dev -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  db-test:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: flowsync
+      POSTGRES_PASSWORD: flowsync
+      POSTGRES_DB: flowsync_test
+    ports:
+      - "54411:5432"
+    # Efímera: cada arranque empieza vacía. Nada de lo que deje una ejecución
+    # de la batería sobrevive a un `make db-down`.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U flowsync -d flowsync_test -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  db-data:
